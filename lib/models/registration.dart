@@ -2,11 +2,17 @@ class EventInfo {
   final String id;
   final String title;
   final String? icon;
+  final DateTime? start;
+  final DateTime? end;
+  final String? publicationState;
 
   const EventInfo({
     required this.id,
     required this.title,
     this.icon,
+    this.start,
+    this.end,
+    this.publicationState,
   });
 
   factory EventInfo.fromJson(Map<String, dynamic>? json) {
@@ -17,6 +23,9 @@ class EventInfo {
       id: json['id']?.toString() ?? '',
       title: json['title']?.toString() ?? 'Unnamed Event',
       icon: json['icon']?.toString(),
+      start: json['start'] != null ? DateTime.tryParse(json['start'].toString()) : null,
+      end: json['end'] != null ? DateTime.tryParse(json['end'].toString()) : null,
+      publicationState: json['publicationState']?.toString(),
     );
   }
 
@@ -24,6 +33,9 @@ class EventInfo {
         'id': id,
         'title': title,
         'icon': icon,
+        if (start != null) 'start': start!.toIso8601String(),
+        if (end != null) 'end': end!.toIso8601String(),
+        if (publicationState != null) 'publicationState': publicationState,
       };
 }
 

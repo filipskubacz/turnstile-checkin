@@ -6,9 +6,12 @@ class AppSettings {
   final int autoRefreshMinutes;
   final bool isSafeMode; // Dry-run protection for live environment
   final bool isExpertMode; // Allows manual check-in from attendee roster
+  final String imprint;
 
   static const String defaultApiUrl =
       String.fromEnvironment('GRAPHQL_ENDPOINT', defaultValue: '');
+  static const String defaultImprint =
+      String.fromEnvironment('IMPRINT', defaultValue: '');
 
   const AppSettings({
     this.bearerToken = '',
@@ -16,8 +19,9 @@ class AppSettings {
     this.activeEventIds = const [],
     this.timeoutSeconds = 30,
     this.autoRefreshMinutes = 10,
-    this.isSafeMode = true,
+    this.isSafeMode = false,
     this.isExpertMode = false,
+    this.imprint = defaultImprint,
   });
 
   AppSettings copyWith({
@@ -28,6 +32,7 @@ class AppSettings {
     int? autoRefreshMinutes,
     bool? isSafeMode,
     bool? isExpertMode,
+    String? imprint,
   }) {
     return AppSettings(
       bearerToken: bearerToken ?? this.bearerToken,
@@ -37,6 +42,7 @@ class AppSettings {
       autoRefreshMinutes: autoRefreshMinutes ?? this.autoRefreshMinutes,
       isSafeMode: isSafeMode ?? this.isSafeMode,
       isExpertMode: isExpertMode ?? this.isExpertMode,
+      imprint: imprint ?? this.imprint,
     );
   }
 
@@ -49,6 +55,7 @@ class AppSettings {
       'autoRefreshMinutes': autoRefreshMinutes,
       'isSafeMode': isSafeMode,
       'isExpertMode': isExpertMode,
+      'imprint': imprint,
     };
   }
 
@@ -57,6 +64,11 @@ class AppSettings {
     final resolvedUrl = (rawUrl == null || rawUrl.isEmpty)
         ? defaultApiUrl
         : rawUrl;
+
+    final rawImprint = json['imprint'] as String?;
+    final resolvedImprint = (rawImprint == null || rawImprint.isEmpty)
+        ? defaultImprint
+        : rawImprint;
 
     return AppSettings(
       bearerToken: json['bearerToken'] as String? ?? '',
@@ -67,8 +79,9 @@ class AppSettings {
           const [],
       timeoutSeconds: json['timeoutSeconds'] as int? ?? 30,
       autoRefreshMinutes: json['autoRefreshMinutes'] as int? ?? 10,
-      isSafeMode: json['isSafeMode'] as bool? ?? true,
+      isSafeMode: json['isSafeMode'] as bool? ?? false,
       isExpertMode: json['isExpertMode'] as bool? ?? false,
+      imprint: resolvedImprint,
     );
   }
 }

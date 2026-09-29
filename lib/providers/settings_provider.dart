@@ -39,14 +39,23 @@ class SettingsProvider extends ChangeNotifier {
   }
 
   Future<void> setExpertMode(bool enabled) async {
-    await updateSettings(_settings.copyWith(isExpertMode: enabled));
+    final ids = (!enabled && _settings.activeEventIds.length > 1)
+        ? [_settings.activeEventIds.first]
+        : _settings.activeEventIds;
+    await updateSettings(_settings.copyWith(isExpertMode: enabled, activeEventIds: ids));
   }
 
   Future<void> addEventId(String eventId) async {
     final cleanId = eventId.trim();
-    if (cleanId.isEmpty || _settings.activeEventIds.contains(cleanId)) return;
-    final updated = List<String>.from(_settings.activeEventIds)..add(cleanId);
-    await updateSettings(_settings.copyWith(activeEventIds: updated));
+    if (cleanId.isEmpty) return;
+    if (_settings.isExpertMode) {
+      if (_settings.activeEventIds.contains(cleanId)) return;
+      final updated = List<String>.from(_settings.activeEventIds)..add(cleanId);
+      await updateSettings(_settings.copyWith(activeEventIds: updated));
+    } else {
+      if (_settings.activeEventIds.length == 1 && _settings.activeEventIds.first == cleanId) return;
+      await updateSettings(_settings.copyWith(activeEventIds: [cleanId]));
+    }
   }
 
   Future<void> removeEventId(String eventId) async {

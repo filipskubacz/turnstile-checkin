@@ -102,6 +102,32 @@ mutation useRegistrationEntry($registrationId: ID!, $manual: Boolean) {
 }
 ''';
 
+  static const String loadEventDisplayDataQuery = r'''
+query LoadEventDisplayData($eventID: ID!) {
+  event(id: $eventID) {
+    id
+    title
+    icon
+    start
+    end
+    publicationState
+  }
+}
+''';
+
+  static const String getEventListForShellQuery = r'''
+query getEventListForShell {
+  events {
+    id
+    icon
+    title
+    start
+    end
+    publicationState
+  }
+}
+''';
+
   static const String loadEventForRunningQuery = r'''
 query loadEventForRunning($id: ID!) {
   event(id: $id) {
@@ -379,6 +405,100 @@ query loadEventForRunning($id: ID!) {
       return GraphQLResult.failure(
         'Request timed out (${settings.timeoutSeconds}s). Server took too long to respond.',
       );
+    } on SocketException catch (e) {
+      return GraphQLResult.failure('Network unreachable: ${e.message}');
+    } catch (e) {
+      return GraphQLResult.failure('Error: $e');
+    }
+  }
+
+  Future<GraphQLResult<EventInfo>> loadEventDisplayData(
+    String eventId,
+    AppSettings settings,
+  ) async {
+    final payload = {
+      'operationName': 'LoadEventDisplayData',
+      'variables': {'eventID': eventId},
+      'extensions': {},
+      'query': loadEventDisplayDataQuery,
+    };
+
+    final timeoutDuration = Duration(seconds: settings.timeoutSeconds);
+    final headers = _buildHeaders(settings);
+
+    try {
+      final uri = Uri.parse(settings.apiUrl.trim());
+      final response = await _client
+          .post(
+            uri,
+            headers: headers,
+            body: jsonEncode(payload),
+          )
+          .timeout(timeoutDuration);
+
+      final body = _decodeGraphQLResponse(response.body);
+
+      final errorMessage = _extractError(body, response.statusCode, response.reasonPhrase);
+      if (errorMessage != null) {
+        return GraphQLResult.failure(errorMessage, rawResponse: body);
+      }
+
+      final data = body['data'] as Map<String, dynamic>?;
+      if (data == null || data['event'] == null) {
+        return GraphQLResult.failure('Event $eventId not found', rawResponse: body);
+      }
+
+      final event = EventInfo.fromJson(data['event'] as Map<String, dynamic>);
+      return GraphQLResult.success(event, rawResponse: body);
+    } on TimeoutException {
+      return const GraphQLResult.failure('Request timed out.');
+    } on SocketException catch (e) {
+      return GraphQLResult.failure('Network unreachable: ${e.message}');
+    } catch (e) {
+      return GraphQLResult.failure('Error: $e');
+    }
+  }
+
+  Future<GraphQLResult<List<EventInfo>>> getPublicEvents(
+    AppSettings settings,
+  ) async {
+    final payload = {
+      'operationName': 'getEventListForShell',
+      'variables': {},
+      'extensions': {},
+      'query': getEventListForShellQuery,
+    };
+
+    final timeoutDuration = Duration(seconds: settings.timeoutSeconds);
+    final headers = _buildHeaders(settings);
+
+    try {
+      final uri = Uri.parse(settings.apiUrl.trim());
+      final response = await _client
+          .post(
+            uri,
+            headers: headers,
+            body: jsonEncode(payload),
+          )
+          .timeout(timeoutDuration);
+
+      final body = _decodeGraphQLResponse(response.body);
+
+      final errorMessage = _extractError(body, response.statusCode, response.reasonPhrase);
+      if (errorMessage != null) {
+        return GraphQLResult.failure(errorMessage, rawResponse: body);
+      }
+
+      final data = body['data'] as Map<String, dynamic>?;
+      final rawEvents = data?['events'] as List<dynamic>? ?? [];
+      final events = rawEvents
+          .whereType<Map<String, dynamic>>()
+          .map((e) => EventInfo.fromJson(e))
+          .toList();
+
+      return GraphQLResult.success(events, rawResponse: body);
+    } on TimeoutException {
+      return const GraphQLResult.failure('Request timed out.');
     } on SocketException catch (e) {
       return GraphQLResult.failure('Network unreachable: ${e.message}');
     } catch (e) {

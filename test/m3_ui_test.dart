@@ -422,10 +422,10 @@ void main() {
       expect(expertHeader, findsNothing);
 
       // Scroll to About section and tap version number 10 times
-      await tester.drag(find.byType(ListView).first, const Offset(0, -600));
+      final versionFinder = find.textContaining('Version');
+      await tester.scrollUntilVisible(versionFinder, 200, scrollable: find.byType(Scrollable).first);
       await tester.pumpAndSettle();
 
-      final versionFinder = find.textContaining('Version');
       expect(versionFinder, findsOneWidget);
 
       for (var i = 0; i < 10; i++) {
@@ -434,10 +434,69 @@ void main() {
       }
       await tester.pumpAndSettle();
 
+      await tester.scrollUntilVisible(expertHeader, -200, scrollable: find.byType(Scrollable).first);
+      await tester.pumpAndSettle();
+
       // Now Expert Mode is unlocked and visible
       expect(expertHeader, findsOneWidget);
       expect(find.text('Expert Mode Disabled'), findsOneWidget);
       expect(find.textContaining('Warning: With Expert Mode enabled'), findsOneWidget);
+    });
+
+    testWidgets('SettingsScreen renders GitHub link, Imprint dialog, and Open Source Licenses', (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final storage = StorageService(prefs);
+      final settingsProv = SettingsProvider(storage);
+      await settingsProv.updateSettings(
+        settingsProv.settings.copyWith(
+          imprint: 'Test Impressum ESN TUMi e.V.',
+        ),
+      );
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider.value(value: settingsProv),
+          ],
+          child: MaterialApp(
+            home: SettingsScreen(storageService: storage),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Scroll to About section
+      final githubFinder = find.text('Source Code');
+      await tester.scrollUntilVisible(githubFinder, 200, scrollable: find.byType(Scrollable).first);
+      await tester.pumpAndSettle();
+
+      expect(githubFinder, findsOneWidget);
+      expect(find.text('github.com/filipskubacz/turnstile-checkin'), findsOneWidget);
+
+      final imprintFinder = find.text('Imprint');
+      expect(imprintFinder, findsOneWidget);
+
+      final licensesFinder = find.text('Open Source Licenses');
+      expect(licensesFinder, findsOneWidget);
+
+      // Tap Imprint to open dialog
+      await tester.tap(imprintFinder);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.text('Test Impressum ESN TUMi e.V.'), findsOneWidget);
+
+      // Close dialog
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+
+      // Tap Open Source Licenses
+      await tester.tap(licensesFinder);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(LicensePage), findsOneWidget);
     });
 
     testWidgets('TicketPreviewSheet quantity selector allows choosing from 1 to N attendees', (tester) async {

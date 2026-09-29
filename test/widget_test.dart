@@ -13,7 +13,7 @@ void main() {
     final prefs = await SharedPreferences.getInstance();
     final storage = StorageService(prefs);
 
-    expect(storage.loadSettings().isSafeMode, isTrue);
+    expect(storage.loadSettings().isSafeMode, isFalse);
 
     final gql = GraphQLService(storage);
     final queue = QueueService(

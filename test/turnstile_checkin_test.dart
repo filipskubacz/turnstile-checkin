@@ -1,10 +1,14 @@
+import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:turnstile_checkin/models/app_settings.dart';
 import 'package:turnstile_checkin/models/queue_item.dart';
 import 'package:turnstile_checkin/models/registration.dart';
 import 'package:turnstile_checkin/providers/attendees_provider.dart';
 import 'package:turnstile_checkin/providers/scanner_provider.dart';
+import 'package:turnstile_checkin/providers/settings_provider.dart';
 import 'package:turnstile_checkin/services/graphql_service.dart';
 import 'package:turnstile_checkin/services/queue_service.dart';
 import 'package:turnstile_checkin/services/storage_service.dart';
@@ -142,7 +146,7 @@ void main() {
   group('AppSettings Tests', () {
     test('Settings serialization and defaults', () {
       const settings = AppSettings();
-      expect(settings.isSafeMode, isTrue);
+      expect(settings.isSafeMode, isFalse);
       expect(settings.timeoutSeconds, 30);
       expect(settings.activeEventIds, isEmpty);
       expect(settings.apiUrl, AppSettings.defaultApiUrl);
@@ -171,6 +175,181 @@ void main() {
       };
       final settings = AppSettings.fromJson(emptyJson);
       expect(settings.apiUrl, AppSettings.defaultApiUrl);
+    });
+
+    test('Default constructor and fromJson enable Live mode by default', () {
+      const defaultSettings = AppSettings();
+      expect(defaultSettings.isSafeMode, isFalse);
+
+      final fromEmptyJson = AppSettings.fromJson({});
+      expect(fromEmptyJson.isSafeMode, isFalse);
+    });
+
+    test('Imprint serialization and defaultImprint fallback', () {
+      const defaultSettings = AppSettings();
+      expect(defaultSettings.imprint, AppSettings.defaultImprint);
+
+      final withCustom = defaultSettings.copyWith(imprint: 'Custom Impressum');
+      expect(withCustom.imprint, 'Custom Impressum');
+
+      final json = withCustom.toJson();
+      expect(json['imprint'], 'Custom Impressum');
+
+      final restored = AppSettings.fromJson(json);
+      expect(restored.imprint, 'Custom Impressum');
+
+      final fromEmpty = AppSettings.fromJson({'imprint': ''});
+      expect(fromEmpty.imprint, AppSettings.defaultImprint);
+    });
+
+    test('SettingsProvider enforces single active event when expert mode is disabled', () async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final storage = StorageService(prefs);
+      final provider = SettingsProvider(storage);
+
+      expect(provider.settings.isExpertMode, isFalse);
+
+      await provider.addEventId('event-1');
+      expect(provider.settings.activeEventIds, ['event-1']);
+
+      // Adding second event replaces the first event in non-expert mode
+      await provider.addEventId('event-2');
+      expect(provider.settings.activeEventIds, ['event-2']);
+
+      // Enable expert mode
+      await provider.setExpertMode(true);
+      expect(provider.settings.isExpertMode, isTrue);
+
+      // Now multiple events can be added
+      await provider.addEventId('event-3');
+      expect(provider.settings.activeEventIds, ['event-2', 'event-3']);
+
+      // Disabling expert mode truncates active events to only the first one
+      await provider.setExpertMode(false);
+      expect(provider.settings.isExpertMode, isFalse);
+      expect(provider.settings.activeEventIds, ['event-2']);
+    });
+  });
+
+  group('Event URL and Public Events GraphQL Tests', () {
+    test('EventInfo parses start, end, and publicationState correctly', () {
+      final json = {
+        'id': '93e45663-1159-4fe4-a8ce-3e665e459e0f',
+        'title': 'Kiosk Crawl',
+        'icon': 'beer-bottle',
+        'start': '2026-09-30T17:00:00.000Z',
+        'end': '2026-09-30T20:00:00.000Z',
+        'publicationState': 'PUBLIC',
+      };
+
+      final info = EventInfo.fromJson(json);
+      expect(info.id, '93e45663-1159-4fe4-a8ce-3e665e459e0f');
+      expect(info.title, 'Kiosk Crawl');
+      expect(info.icon, 'beer-bottle');
+      expect(info.start?.toIso8601String(), '2026-09-30T17:00:00.000Z');
+      expect(info.publicationState, 'PUBLIC');
+
+      final serialized = info.toJson();
+      expect(serialized['id'], '93e45663-1159-4fe4-a8ce-3e665e459e0f');
+      expect(serialized['publicationState'], 'PUBLIC');
+    });
+
+    test('UUID extraction regex handles URLs and raw UUIDs', () {
+      final regex = RegExp(
+        r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}',
+      );
+
+      const url1 = 'https://tumi.esn.world/events/93e45663-1159-4fe4-a8ce-3e665e459e0f';
+      const url2 = 'https://tumi.esn.world/events/93e45663-1159-4fe4-a8ce-3e665e459e0f/run?tab=scan';
+      const rawUuid = '93e45663-1159-4fe4-a8ce-3e665e459e0f';
+      const invalid = 'https://tumi.esn.world/about';
+
+      expect(regex.firstMatch(url1)?.group(0), '93e45663-1159-4fe4-a8ce-3e665e459e0f');
+      expect(regex.firstMatch(url2)?.group(0), '93e45663-1159-4fe4-a8ce-3e665e459e0f');
+      expect(regex.firstMatch(rawUuid)?.group(0), '93e45663-1159-4fe4-a8ce-3e665e459e0f');
+      expect(regex.firstMatch(invalid), isNull);
+    });
+
+    test('GraphQLService.loadEventDisplayData parses unauthenticated event details', () async {
+      final mockClient = MockClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'data': {
+              'event': {
+                'id': '93e45663-1159-4fe4-a8ce-3e665e459e0f',
+                'title': 'Kiosk Crawl',
+                'icon': 'beer-bottle',
+                'start': '2026-09-30T17:00:00.000Z',
+                'end': '2026-09-30T20:00:00.000Z',
+                'publicationState': 'PUBLIC',
+              }
+            }
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final storage = StorageService(prefs);
+      final gql = GraphQLService(storage, client: mockClient);
+
+      final res = await gql.loadEventDisplayData(
+        '93e45663-1159-4fe4-a8ce-3e665e459e0f',
+        const AppSettings(apiUrl: 'https://test.api/graphql'),
+      );
+
+      expect(res.isSuccess, isTrue);
+      expect(res.data?.id, '93e45663-1159-4fe4-a8ce-3e665e459e0f');
+      expect(res.data?.title, 'Kiosk Crawl');
+      expect(res.data?.icon, 'beer-bottle');
+    });
+
+    test('GraphQLService.getPublicEvents parses list of public events', () async {
+      final mockClient = MockClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'data': {
+              'events': [
+                {
+                  'id': '93e45663-1159-4fe4-a8ce-3e665e459e0f',
+                  'title': 'Kiosk Crawl',
+                  'icon': 'beer-bottle',
+                  'start': '2026-09-30T17:00:00.000Z',
+                  'end': '2026-09-30T20:00:00.000Z',
+                  'publicationState': 'PUBLIC',
+                },
+                {
+                  'id': 'e9c999cc-04c9-4b66-be99-c84e97bf8881',
+                  'title': 'Fit For TUM',
+                  'icon': 'class',
+                  'start': '2026-09-28T07:00:00.000Z',
+                  'end': '2026-09-28T09:00:00.000Z',
+                  'publicationState': 'PUBLIC',
+                }
+              ]
+            }
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final storage = StorageService(prefs);
+      final gql = GraphQLService(storage, client: mockClient);
+
+      final res = await gql.getPublicEvents(
+        const AppSettings(apiUrl: 'https://test.api/graphql'),
+      );
+
+      expect(res.isSuccess, isTrue);
+      expect(res.data?.length, 2);
+      expect(res.data?[0].title, 'Kiosk Crawl');
+      expect(res.data?[1].title, 'Fit For TUM');
     });
   });
 
